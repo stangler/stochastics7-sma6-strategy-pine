@@ -1,0 +1,129 @@
+//@version=6
+strategy("ストキャス7×SMA6 逆張り検証(FX 5分足)", shorttitle="Sto7Strat", overlay=true,
+     initial_capital=1000000, default_qty_type=strategy.fixed, default_qty_value=1,
+     commission_type=strategy.commission.cash_per_order, commission_value=0,
+     slippage=0, pyramiding=0, calc_on_every_tick=true, max_labels_count=500)
+
+// ===== 入力 =====
+grpP = "ストキャス期間"
+p1 = input.int(5,  "短期1", minval=1, group=grpP)
+p2 = input.int(8,  "短期2", minval=1, group=grpP)
+p3 = input.int(13, "中期1", minval=1, group=grpP)
+p4 = input.int(21, "中期2", minval=1, group=grpP)
+p5 = input.int(34, "中期3", minval=1, group=grpP)
+p6 = input.int(55, "長期1", minval=1, group=grpP)
+p7 = input.int(89, "長期2", minval=1, group=grpP)
+
+grpL = "判定"
+smoothK   = input.int(1, "%K平滑化", minval=1, group=grpL)
+obLevel   = input.float(80, "買われすぎライン", group=grpL)
+osLevel   = input.float(20, "売られすぎライン", group=grpL)
+needCnt   = input.int(7, "判定に必要な本数", minval=1, maxval=7, group=grpL)
+lookback  = input.int(3, "ゾーン到達からエントリー許容本数", minval=0, group=grpL, tooltip="買われすぎ/売られすぎ判定が出てから、この本数以内ならSMAの向きでエントリー。0なら判定が出た足のみ")
+smaLen    = input.int(6, "SMA期間", minval=1, group=grpL)
+
+grpT = "売買設定"
+enableLong  = input.bool(true, "ロング（売られすぎ＋SMA上向き）", group=grpT)
+enableShort = input.bool(true, "ショート（買われすぎ＋SMA下向き）", group=grpT)
+reverseOn   = input.bool(true, "逆シグナルでドテン", group=grpT)
+edgeOnly    = input.bool(true, "サイン発生の1本目のみエントリー", group=grpT, tooltip="オン：条件が揃った最初の足だけエントリー（損切り後の同方向の連続エントリーを防ぐ）。オフ：条件が続く間、決済のたびに再エントリー")
+pipSizeIn   = input.float(0.0, "1pipの価格幅（0で自動：最小値幅×10）", minval=0, group=grpT, tooltip="XAUUSDで0.1pip扱いにしたい場合などは手動指定")
+tpPips      = input.float(0.0, "利確 pips（0で無効）", minval=0, step=1, group=grpT)
+slPips      = input.float(0.0, "損切り pips（0で無効）", minval=0, step=1, group=grpT)
+maxBars     = input.int(0, "最大保有本数（0で無効）", minval=0, group=grpT)
+
+grpA = "アラート"
+useAlert = input.bool(true, "アラートメッセージを出す", group=grpA, tooltip="アラート作成時の条件で「alert()関数呼び出しのみ」を選ぶだけで、メッセージ入力は不要です")
+
+grpS = "時間帯フィルター"
+useSession   = input.bool(false, "取引時間帯を限定", group=grpS)
+sessionStr   = input.session("0800-2400", "取引時間帯", group=grpS)
+sessionTz    = input.string("Asia/Tokyo", "タイムゾーン", group=grpS)
+closeOutside = input.bool(false, "時間帯の外に出たら決済", group=grpS)
+
+// ===== 計算 =====
+f_sto(len) => ta.sma(ta.stoch(close, high, low, len), smoothK)
+
+s1 = f_sto(p1)
+s2 = f_sto(p2)
+s3 = f_sto(p3)
+s4 = f_sto(p4)
+s5 = f_sto(p5)
+s6 = f_sto(p6)
+s7 = f_sto(p7)
+
+obCnt = (s1 >= obLevel ? 1 : 0) + (s2 >= obLevel ? 1 : 0) + (s3 >= obLevel ? 1 : 0) + (s4 >= obLevel ? 1 : 0) + (s5 >= obLevel ? 1 : 0) + (s6 >= obLevel ? 1 : 0) + (s7 >= obLevel ? 1 : 0)
+osCnt = (s1 <= osLevel ? 1 : 0) + (s2 <= osLevel ? 1 : 0) + (s3 <= osLevel ? 1 : 0) + (s4 <= osLevel ? 1 : 0) + (s5 <= osLevel ? 1 : 0) + (s6 <= osLevel ? 1 : 0) + (s7 <= osLevel ? 1 : 0)
+
+allOB = obCnt >= needCnt
+allOS = osCnt >= needCnt
+
+recentOB = nz(ta.barssince(allOB), 9999) <= lookback
+recentOS = nz(ta.barssince(allOS), 9999) <= lookback
+
+smaV  = ta.sma(close, smaLen)
+smaUp = smaV > smaV[1]
+smaDn = smaV < smaV[1]
+
+longSig  = recentOS and smaUp
+shortSig = recentOB and smaDn
+longEntry  = edgeOnly ? (longSig and not longSig[1]) : longSig
+shortEntry = edgeOnly ? (shortSig and not shortSig[1]) : shortSig
+
+// ===== 時間帯 =====
+inSession = not useSession or not na(time(timeframe.period, sessionStr, sessionTz))
+
+// ===== pips =====
+pip = pipSizeIn > 0 ? pipSizeIn : syminfo.mintick * 10
+
+// ===== エントリー =====
+canLong  = strategy.position_size == 0 or (strategy.position_size < 0 and reverseOn)
+canShort = strategy.position_size == 0 or (strategy.position_size > 0 and reverseOn)
+
+longGo  = longEntry and enableLong and canLong and inSession
+shortGo = shortEntry and enableShort and canShort and inSession
+
+// エントリーは足の確定時のみ（足の途中で条件が消えるのを防ぐ）
+if longGo and barstate.isconfirmed
+    strategy.entry("L", strategy.long)
+
+if shortGo and barstate.isconfirmed
+    strategy.entry("S", strategy.short)
+
+// ===== エグジット =====
+// 利確・損切りはエントリー注文と同時に「エントリー価格からのティック数」で指定する
+// （エントリー約定の次の足から効く方式だと、約定足で動いた分だけ滑るため）
+tpTicks = tpPips > 0 ? tpPips * pip / syminfo.mintick : na
+slTicks = slPips > 0 ? slPips * pip / syminfo.mintick : na
+
+if tpPips > 0 or slPips > 0
+    strategy.exit("L exit", "L", profit = tpTicks, loss = slTicks)
+    strategy.exit("S exit", "S", profit = tpTicks, loss = slTicks)
+
+if maxBars > 0 and strategy.position_size != 0
+    if bar_index - strategy.opentrades.entry_bar_index(0) >= maxBars
+        strategy.close_all(comment="時間切れ")
+
+if useSession and closeOutside and not inSession and strategy.position_size != 0
+    strategy.close_all(comment="時間帯外")
+
+// ===== アラート（メッセージはスクリプト内で完結）=====
+alertInfo = syminfo.ticker + " [" + timeframe.period + "] "
+
+if useAlert
+    if longGo
+        alert(alertInfo + "ロングエントリー", alert.freq_once_per_bar_close)
+    if shortGo
+        alert(alertInfo + "ショートエントリー", alert.freq_once_per_bar_close)
+    // 決済（利確・損切り・ドテンなど）は足の途中でも、約定した時点で通知する
+    if strategy.closedtrades > strategy.closedtrades[1]
+        n = strategy.closedtrades - 1
+        dirTxt = strategy.closedtrades.entry_id(n) == "L" ? "ロング" : "ショート"
+        pnl = strategy.closedtrades.profit(n)
+        alert(alertInfo + dirTxt + "決済 損益:" + (pnl >= 0 ? "+" : "") + str.tostring(pnl, "#.##"), alert.freq_once_per_bar)
+
+// ===== 表示 =====
+plot(smaV, "SMA", color=smaUp ? color.aqua : color.orange, linewidth=2)
+bgcolor(allOS ? color.new(color.lime, 88) : allOB ? color.new(color.red, 88) : na)
+plotshape(longGo, "ロング条件", shape.triangleup, location.belowbar, color.lime, size=size.tiny)
+plotshape(shortGo, "ショート条件", shape.triangledown, location.abovebar, color.red, size=size.tiny)
