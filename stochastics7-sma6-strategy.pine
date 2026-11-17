@@ -34,6 +34,7 @@ maxBars     = input.int(0, "最大保有本数（0で無効）", minval=0, group
 
 grpA = "アラート"
 useAlert = input.bool(true, "アラートメッセージを出す", group=grpA, tooltip="アラート作成時の条件で「alert()関数呼び出しのみ」を選ぶだけで、メッセージ入力は不要です")
+useEarly = input.bool(true, "確定前の予告アラートも出す", group=grpA, tooltip="足の途中で条件が揃った最初のティックで「予告」を通知します。足の確定までに条件が消えることがあります（エントリー自体は確定後のみ）")
 
 grpS = "時間帯フィルター"
 useSession   = input.bool(false, "取引時間帯を限定", group=grpS)
@@ -111,10 +112,17 @@ if useSession and closeOutside and not inSession and strategy.position_size != 0
 alertInfo = syminfo.ticker + " [" + timeframe.period + "] "
 
 if useAlert
+    // 予告：足の途中で条件が揃った時点（未確定。足の確定までに消えることがある）
+    if useEarly and not barstate.isconfirmed
+        if longGo
+            alert(alertInfo + "ロング予告（足の確定前）", alert.freq_once_per_bar)
+        if shortGo
+            alert(alertInfo + "ショート予告（足の確定前）", alert.freq_once_per_bar)
+    // 確定：足が確定した時点（バックテストと同じ条件。次の足の始値で約定）
     if longGo
-        alert(alertInfo + "ロングエントリー", alert.freq_once_per_bar_close)
+        alert(alertInfo + "ロングエントリー（確定）", alert.freq_once_per_bar_close)
     if shortGo
-        alert(alertInfo + "ショートエントリー", alert.freq_once_per_bar_close)
+        alert(alertInfo + "ショートエントリー（確定）", alert.freq_once_per_bar_close)
     // 決済（利確・損切り・ドテンなど）は足の途中でも、約定した時点で通知する
     if strategy.closedtrades > strategy.closedtrades[1]
         n = strategy.closedtrades - 1
