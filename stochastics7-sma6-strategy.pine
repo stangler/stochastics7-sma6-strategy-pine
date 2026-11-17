@@ -34,6 +34,7 @@ maxBars     = input.int(0, "最大保有本数（0で無効）", minval=0, group
 
 grpA = "アラート"
 useAlert = input.bool(true, "アラートメッセージを出す", group=grpA, tooltip="アラート作成時の条件で「alert()関数呼び出しのみ」を選ぶだけで、メッセージ入力は不要です")
+useSlack = input.bool(false, "メッセージをSlack用のJSON形式にする", group=grpA, tooltip="オンにすると、通知メッセージが {\"text\":\"...\"} の形式になります。アラートのWebhook URLにSlackのIncoming Webhook URLを設定して使います（アプリ通知やメールには、JSONのまま表示されます）")
 useEarly = input.bool(true, "確定前の予告アラートも出す", group=grpA, tooltip="足の途中で条件が揃った最初のティックで「予告」を通知します。足の確定までに条件が消えることがあります（エントリー自体は確定後のみ）")
 
 grpS = "時間帯フィルター"
@@ -110,25 +111,26 @@ if useSession and closeOutside and not inSession and strategy.position_size != 0
 
 // ===== アラート（メッセージはスクリプト内で完結）=====
 alertInfo = syminfo.ticker + " [" + timeframe.period + "] "
+f_msg(m) => useSlack ? "{\"text\":\"" + m + "\"}" : m
 
 if useAlert
     // 予告：足の途中で条件が揃った時点（未確定。足の確定までに消えることがある）
     if useEarly and not barstate.isconfirmed
         if longGo
-            alert(alertInfo + "ロング予告（足の確定前）", alert.freq_once_per_bar)
+            alert(f_msg(alertInfo + "ロング予告（足の確定前）"), alert.freq_once_per_bar)
         if shortGo
-            alert(alertInfo + "ショート予告（足の確定前）", alert.freq_once_per_bar)
+            alert(f_msg(alertInfo + "ショート予告（足の確定前）"), alert.freq_once_per_bar)
     // 確定：足が確定した時点（バックテストと同じ条件。次の足の始値で約定）
     if longGo
-        alert(alertInfo + "ロングエントリー（確定）", alert.freq_once_per_bar_close)
+        alert(f_msg(alertInfo + "ロングエントリー（確定）"), alert.freq_once_per_bar_close)
     if shortGo
-        alert(alertInfo + "ショートエントリー（確定）", alert.freq_once_per_bar_close)
+        alert(f_msg(alertInfo + "ショートエントリー（確定）"), alert.freq_once_per_bar_close)
     // 決済（利確・損切り・ドテンなど）は足の途中でも、約定した時点で通知する
     if strategy.closedtrades > strategy.closedtrades[1]
         n = strategy.closedtrades - 1
         dirTxt = strategy.closedtrades.entry_id(n) == "L" ? "ロング" : "ショート"
         pnl = strategy.closedtrades.profit(n)
-        alert(alertInfo + dirTxt + "決済 損益:" + (pnl >= 0 ? "+" : "") + str.tostring(pnl, "#.##"), alert.freq_once_per_bar)
+        alert(f_msg(alertInfo + dirTxt + "決済 損益:" + (pnl >= 0 ? "+" : "") + str.tostring(pnl, "#.##")), alert.freq_once_per_bar)
 
 // ===== 表示 =====
 plot(smaV, "SMA", color=smaUp ? color.aqua : color.orange, linewidth=2)
