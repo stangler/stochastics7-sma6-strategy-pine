@@ -32,6 +32,10 @@ tpPips      = input.float(0.0, "利確 pips（0で無効）", minval=0, step=1, 
 slPips      = input.float(0.0, "損切り pips（0で無効）", minval=0, step=1, group=grpT)
 maxBars     = input.int(0, "最大保有本数（0で無効）", minval=0, group=grpT)
 
+grpD = "表示"
+showTbl = input.bool(true, "SMAテーブルを表示", group=grpD)
+tblPosStr = input.string("top_right", "テーブルの位置", options=["top_left", "top_right", "bottom_left", "bottom_right"], group=grpD)
+
 grpA = "アラート"
 useAlert = input.bool(true, "アラートメッセージを出す", group=grpA, tooltip="アラート作成時の条件で「alert()関数呼び出しのみ」を選ぶだけで、メッセージ入力は不要です")
 useSlack = input.bool(false, "メッセージをSlack用のJSON形式にする", group=grpA, tooltip="オンにすると、通知メッセージが {\"text\":\"...\"} の形式になります。アラートのWebhook URLにSlackのIncoming Webhook URLを設定して使います（アプリ通知やメールには、JSONのまま表示されます）")
@@ -131,6 +135,14 @@ if useAlert
         dirTxt = strategy.closedtrades.entry_id(n) == "L" ? "ロング" : "ショート"
         pnl = strategy.closedtrades.profit(n)
         alert(f_msg(alertInfo + dirTxt + "決済 損益:" + (pnl >= 0 ? "+" : "") + str.tostring(pnl, "#.##")), alert.freq_once_per_bar)
+
+// ===== SMAテーブル（最新の足でリアルタイム更新）=====
+tblPos = tblPosStr == "top_left" ? position.top_left : tblPosStr == "bottom_left" ? position.bottom_left : tblPosStr == "bottom_right" ? position.bottom_right : position.top_right
+var table smaTbl = table.new(tblPos, 1, 1, bgcolor=na, frame_width=0, border_width=0)
+smaTxt = smaUp ? "上向き" : smaDn ? "下向き" : "横ばい"
+
+if barstate.islast and showTbl
+    table.cell(smaTbl, 0, 0, "SMA(" + str.tostring(smaLen) + "): " + str.tostring(smaV, format.mintick) + " - " + smaTxt, text_color=color.white, text_halign=text.align_left, text_size=size.normal, bgcolor=color.new(color.black, 20))
 
 // ===== 表示 =====
 plot(smaV, "SMA", color=smaUp ? color.aqua : color.orange, linewidth=2)
